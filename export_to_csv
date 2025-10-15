@@ -1,11 +1,37 @@
 #!/usr/bin/env python3
 
 import csv
-# Importação CLÁSSICA do Debian/Tails: A maioria das classes de controle
-# fica diretamente no módulo 'stem'.
-from stem import CircStatus, ControlPort, InvalidRequest 
-# import stem.control  <-- REMOVIDO!
-# from stem.util import term # Não necessário
+import sys
+# Variáveis para armazenar as classes
+CircStatus = None
+ControlPort = None
+InvalidRequest = None
+
+# Tenta encontrar as classes usando as 3 estruturas mais comuns:
+try:
+    # 1. Tenta a estrutura moderna (pip)
+    from stem.control import ControlPort, InvalidRequest
+    from stem import CircStatus
+    print("DEBUG: Usando estrutura de importação 'stem.control'.")
+except ImportError:
+    try:
+        # 2. Tenta a estrutura antiga (Debian/apt)
+        from stem import CircStatus, ControlPort, InvalidRequest
+        print("DEBUG: Usando estrutura de importação 'from stem'.")
+    except ImportError:
+        try:
+            # 3. Tenta a estrutura com importação completa (para compatibilidade total)
+            import stem.control
+            from stem import CircStatus
+            ControlPort = stem.control.ControlPort
+            InvalidRequest = stem.control.InvalidRequest
+            print("DEBUG: Usando importação de módulo completo (stem.control.ControlPort).")
+        except ImportError:
+            # Se todas falharem, o pacote não está acessível
+            print("\n❌ ERRO FATAL DE IMPORTAÇÃO:")
+            print("Nenhuma das formas de importar o 'stem' funcionou. O pacote não está instalado ou acessível.")
+            print("Atenção: Você instalou com 'sudo apt install python3-stem' e não com 'pip'?")
+            sys.exit(1) # Sai do script
 
 # Caminho onde o arquivo CSV será salvo
 csv_file_path = "/tmp/circuitos_tor.csv" 
@@ -13,7 +39,7 @@ csv_file_path = "/tmp/circuitos_tor.csv"
 print("Tentando conectar à porta de controle do Tor...")
 
 try:
-    # Chama ControlPort diretamente, sem 'stem.control.'
+    # O script usa as variáveis que foram definidas na importação bem-sucedida
     with ControlPort() as control_port: 
         circuit_data = []
         for circuit in control_port.get_circuits():
@@ -44,14 +70,12 @@ try:
         else:
             print("\n⚠️ NENHUM circuito Tor 'Built' (construído) ativo foi encontrado.")
 
-# Chama InvalidRequest diretamente
+# Tratamento de Erros usa a variável que foi importada (InvalidRequest)
 except InvalidRequest as exc: 
-    print(f"\n❌ ERRO DE COMUNICAÇÃO.")
-    print("Detalhes: Verifique se o Tor está completamente conectado e rodando.")
+    print(f"\n❌ ERRO DE COMUNICAÇÃO. Verifique o Tor e as permissões.")
     print(f"Mensagem: {exc}")
 except ConnectionRefusedError:
     print(f"\n❌ ERRO DE CONEXÃO. O script não conseguiu se conectar à porta de controle do Tor (9051).")
-    print("No Tails, tente reiniciar o Tor Browser e execute o script novamente.")
+    print("Certifique-se de que o Tor está rodando.")
 except Exception as e:
-    print(f"\n❌ ERRO CRÍTICO INESPERADO:")
-    print(f"Mensagem: {e}")
+    print(f"\n❌ Ocorreu um erro inesperado (fora da importação): {e}")
