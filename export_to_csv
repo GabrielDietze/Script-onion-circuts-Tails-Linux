@@ -1,66 +1,57 @@
 #!/usr/bin/env python3
 
 import csv
-# Importação robusta: tenta importar de onde as classes REALMENTE estão
-try:
-    from stem.control import ControlPort, InvalidRequest
-    from stem import CircStatus
-except ImportError:
-    # Caso raro onde CircStatus está em outro lugar, embora improvável
-    from stem import CircStatus
-    # Se stem.control falhar, o erro ocorrerá no ControlPort()
-    import stem.control
-    ControlPort = stem.control.ControlPort
-    InvalidRequest = stem.control.InvalidRequest
+# Importação CLÁSSICA do Debian/Tails: A maioria das classes de controle
+# fica diretamente no módulo 'stem'.
+from stem import CircStatus, ControlPort, InvalidRequest 
+# import stem.control  <-- REMOVIDO!
+# from stem.util import term # Não necessário
 
 # Caminho onde o arquivo CSV será salvo
-# NOTA: O caminho /home/amnesia/ pode exigir permissões especiais.
-csv_file_path = "/tmp/circuitos_tor.csv" # Alterado para /tmp para maior chance de sucesso
+csv_file_path = "/tmp/circuitos_tor.csv" 
 
-# Conecta à porta de controle do Tor
+print("Tentando conectar à porta de controle do Tor...")
+
 try:
-    # ControlPort se conecta à porta 9051 do Tor
-    with ControlPort() as control_port:
+    # Chama ControlPort diretamente, sem 'stem.control.'
+    with ControlPort() as control_port: 
         circuit_data = []
-
-        # Itera sobre todos os circuitos ativos no Tor
         for circuit in control_port.get_circuits():
             
-            # Só coleta dados se o circuito estiver totalmente CONSTRUÍDO (Built)
             if circuit.status == CircStatus.BUILT:
-                
-                # Cria a string do caminho do circuito (Relay1 -> Relay2 -> Relay3)
                 path_str = " -> ".join(
                     f"{entry.nick} ({entry.fingerprint})" for entry in circuit.path
                 )
                 
                 circuit_info = {
                     "id": circuit.id,
-                    # Usamos .name para garantir que o valor no CSV seja a string "BUILT"
                     "status": circuit.status.name, 
                     "path": path_str,
-                    # Usamos .name para obter o propósito como string (ex: "GENERAL")
                     "purpose": circuit.purpose.name, 
                 }
                 circuit_data.append(circuit_info)
 
-        # Escreve os dados no arquivo CSV
+        # Escreve os dados no CSV
         if circuit_data:
             keys = circuit_data[0].keys()
             with open(csv_file_path, 'w', newline='', encoding='utf-8') as output_file:
                 dict_writer = csv.DictWriter(output_file, fieldnames=keys)
-                dict_writer.writeheader() # Escreve o cabeçalho (id, status, path, purpose)
+                dict_writer.writeheader()
                 dict_writer.writerows(circuit_data)
-            print(f"\n✅ Dados exportados com sucesso para: {csv_file_path}")
-            print(f"Total de circuitos construídos: {len(circuit_data)}")
+            
+            print(f"\n🎉 SUCESSO! Circuitos exportados para: {csv_file_path}")
+            print(f"Total de circuitos exportados: {len(circuit_data)}")
         else:
-            print("\n⚠️ Nenhum circuito Tor 'Built' (construído) ativo foi encontrado.")
+            print("\n⚠️ NENHUM circuito Tor 'Built' (construído) ativo foi encontrado.")
 
-# Captura erros de conexão ou requisição inválida ao Tor
-except InvalidRequest as exc:
-    print(f"\n❌ Erro ao conectar/comunicar com a porta de controle do Tor (9051).")
-    print("Certifique-se de que o Tor está rodando e que você tem permissão.")
-    print(f"Detalhes do erro: {exc}")
+# Chama InvalidRequest diretamente
+except InvalidRequest as exc: 
+    print(f"\n❌ ERRO DE COMUNICAÇÃO.")
+    print("Detalhes: Verifique se o Tor está completamente conectado e rodando.")
+    print(f"Mensagem: {exc}")
+except ConnectionRefusedError:
+    print(f"\n❌ ERRO DE CONEXÃO. O script não conseguiu se conectar à porta de controle do Tor (9051).")
+    print("No Tails, tente reiniciar o Tor Browser e execute o script novamente.")
 except Exception as e:
-    # Captura qualquer outro erro inesperado (ex: permissão de arquivo)
-    print(f"\n❌ Ocorreu um erro inesperado: {e}")
+    print(f"\n❌ ERRO CRÍTICO INESPERADO:")
+    print(f"Mensagem: {e}")
