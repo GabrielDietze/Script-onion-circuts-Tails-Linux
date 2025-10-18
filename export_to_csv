@@ -1,41 +1,83 @@
 #!/usr/bin/env python3
 
 import csv
-from stem import CircStatus, ControlPort, InvalidRequest
-from stem.util import term
+import sys
+# Não precisa importar 'stem.control' aqui se estamos importando as classes específicas
+from stem import CircStatus, InvalidRequest # Exceções e Status no topo
 
-# Caminho onde o arquivo CSV será salvo
-csv_file_path = "/home/amnesia/circuitos_tor.csv"
-
-# Conecta à porta de controle do Tor
+# Devido à versão do Tails, a classe de conexão é Controller, não ControlPort
 try:
-    with ControlPort() as control_port:
-        circuit_data = []
-        for circuit in control_port.get_circuits():
-            # Coleta informações detalhadas sobre o circuito
-            if circuit.status == CircStatus.BUILT:
-                path_str = " -> ".join(
-                    f"{entry.nick} ({entry.fingerprint})" for entry in circuit.path
-                )
-                circuit_info = {
-                    "id": circuit.id,
-                    "status": circuit.status,
-                    "path": path_str,
-                    "purpose": circuit.purpose,
-                }
-                circuit_data.append(circuit_info)
+    from stem.control import Controller 
+except ImportError:
+    # Fallback caso a classe esteja diretamente no módulo 'stem'
+    from stem import Controller 
 
-        # Escreve os dados no arquivo CSV
-        if circuit_data:
-            keys = circuit_data[0].keys()
-            with open(csv_file_path, 'w', newline='') as output_file:
-                dict_writer = csv.DictWriter(output_file, fieldnames=keys)
-                dict_writer.writeheader()
-                dict_writer.writerows(circuit_data)
-            print(f"Dados exportados com sucesso para {csv_file_path}")
-        else:
-            print("Nenhum circuito Tor ativo encontrado.")
 
-except InvalidRequest as exc:
-    print(f"Erro ao conectar à porta de controle: {exc}")
+# Caminho onde o arquivo CSV será salvo (em /tmp, onde o debian-tor tem permissão)
+csv_file_path = "/tmp/circuitos_tor.csv" 
+control_port = None # Inicializa a variável para o bloco finally
 
+print("Tentando conectar à porta de controle do Tor...")
+
+try:
+    # --- 1. TENTATIVA: Conexão via Socket Unix (o padrão mais seguro no Tails) ---
+    socket_path = "/run/tor/control" 
+    
+    control_port = Controller.from_socket_path(path=socket_path)
+    control_port.authenticate() 
+    
+    print(f"DEBUG: Conexão estabelecida via Socket Path: {socket_path}")
+
+except Exception as e:
+    # Se a conexão via socket falhar (ex: Erro 111, InvalidRequest, etc.), tenta a porta TCP
+    
+    try:
+        # --- 2. TENTATIVA: Conexão via Porta TCP (9051) ---
+        control_port = Controller.from_port(port=9051)
+        control_port.authenticate()
+        print("DEBUG: Conexão estabelecida via Porta TCP (9051)")
+    except Exception as e_fallback:
+        # Se as duas falharem, levanta o erro original (ou o mais recente)
+        print("\n❌ ERRO CRÍTICO: Falha na conexão de controle do Tor.")
+        print(f"Erro Original: {e}")
+        print(f"Erro Fallback: {e_fallback}")
+        sys.exit(1)
+
+
+# Lógica de extração de dados (Finalmente, o seu código funcionando!)
+circuit_data = []
+
+for circuit in control_port.get_circuits():
+    
+    if circuit.status == CircStatus.BUILT:
+        path_str = " -> ".join(
+            f"{entry.nick} ({entry.fingerprint})" for entry in circuit.path
+        )
+        
+        circuit_info = {
+            "id": circuit.id,
+            "status": circuit.status.name, 
+            "path": path_str,
+            "purpose": circuit.purpose.name, 
+        }
+        circuit_data.append(circuit_info)
+
+# Lógica de escrita do CSV
+if circuit_data:
+    keys = circuit_data[0].keys()
+    with open(csv_file_path, 'w', newline='', encoding='utf-8') as output_file:
+        dict_writer = csv.DictWriter(output_file, fieldnames=keys)
+        dict_writer.writeheader()
+        dict_writer.writerows(circuit_data)
+    
+    print(f"\n🎉 SUCESSO! Circuitos exportados para: {csv_file_path}")
+    print(f"Total de circuitos exportados: {len(circuit_data)}")
+else:
+    print("\n⚠️ NENHUM circuito Tor 'Built' (construído) ativo foi encontrado.")
+
+# Bloco de tratamento de erros e fechamento
+try:
+    if control_port:
+        control_port.close()
+except Exception:
+    pass # Ignora erros ao tentar fechar
